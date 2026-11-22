@@ -14,8 +14,9 @@ reacts to what your session is doing:
   pulled-out drawer for reads and searches, types at a desk for edits, looks out
   through binoculars for web tools, and thinks with a bubble at the start of a turn.
 
-Everything is drawn in one-point perspective, with desks, desk lamps and potted
-plants along the far wall, and the center of the window stays clear for the chat.
+Everything is drawn in one-point perspective. Desks line the far wall, each with
+its own mix of paper piles, desk lamps, potted plants, typewriters and printers.
+The middle of the window stays clear and a little darker, so the chat reads easily.
 
 ## Preview
 
@@ -71,14 +72,26 @@ The backdrop shows in the desktop app after the first message of a session. It
 needs Claude Code 2.1.324 or later (check with `/status`). A session has one
 backdrop, so turn off any other theme mod while this one is on.
 
+## Options
+
+Set these in the plugin's settings (`/config` in a terminal session). A change
+takes effect right away.
+
+| Option | Default | What it does |
+|---|---|---|
+| **Lite mode** (`lite`) | off | Uses less of your computer. Claude and up to two helpers keep moving, but the background holds still: no rain, clouds, stars or lightning, no flying papers or popping drawers, no swinging lamps, clock, plants, typewriters or printers, and no glass blur. |
+| **Dim behind the chat** (`dim`) | medium | How much the scene darkens behind the conversation: `light`, `medium` or `strong`. It darkens both the frosted glass and the middle of the scene. |
+
 ## The /office command
 
-- `/office` shows the level, the fit and how many helpers are working.
+- `/office` shows the level, the fit, how many helpers are working, lite mode and dim.
 - `/office 1` to `/office 6` previews a level; `/office auto` follows the real context again.
 - `/office fit <left%> <right%>` fits the room into the part of the window that
   side panels leave uncovered, for example `/office fit 0 35` with a pane open on
   the right. `/office fit` alone goes back to the whole window. The app does not
   tell mods which panels are open, so this is set by hand.
+- `/office lite on` or `/office lite off` switches lite mode for this session
+  only, whatever the option says.
 
 ## Good to know
 
@@ -94,7 +107,9 @@ backdrop, so turn off any other theme mod while this one is on.
 
 Placement constants (room shape, cabinet stacks, Claude's lane, helper lanes,
 desks, lamps, windows) are at the top of `hooks/scene.ts`, with a comment on
-each. The level thresholds are in `hooks/levels.ts`, and which tools pick which
+each. What stands on each back desk is its `kit` in `BACK_DESKS`, and how dark
+each `dim` setting gets is `CENTER_DIM` there (the glass's is `GLASS_OPACITY` in
+`hooks/register.tsx`). The level thresholds are in `hooks/levels.ts`, and which tools pick which
 pose is `TOOL_ACTIONS` in `hooks/register.tsx`.
 
 ## License

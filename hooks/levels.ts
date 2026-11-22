@@ -26,6 +26,14 @@ export const ACTIONS: readonly Action[] = ['file', 'read', 'write', 'web', 'thin
 /** Most helper mascots drawn, however many subagents run. */
 export const MAX_HELPERS = 6
 
+/** Most helper mascots drawn in lite mode. */
+export const LITE_MAX_HELPERS = 2
+
+/** How much the scene darkens behind the chat. */
+export type Dim = 'light' | 'medium' | 'strong'
+
+export const DIMS: readonly Dim[] = ['light', 'medium', 'strong']
+
 export type SceneState = {
   level: Level
   fit: Fit
@@ -34,9 +42,20 @@ export type SceneState = {
   action: Action
   /** Whether cabinets new at this level pop in: only when the level just rose. */
   pop: boolean
+  /** Lite mode: Claude still moves, the background holds still. */
+  lite: boolean
+  dim: Dim
 }
 
-export const DEFAULT_STATE: SceneState = { level: 1, fit: FULL_WINDOW, helpers: 0, action: 'file', pop: true }
+export const DEFAULT_STATE: SceneState = {
+  level: 1,
+  fit: FULL_WINDOW,
+  helpers: 0,
+  action: 'file',
+  pop: true,
+  lite: false,
+  dim: 'medium',
+}
 
 // percent is absent until the first response of the live window (a fresh
 // or just-compacted session); treat that as level 1.
@@ -68,12 +87,13 @@ export function clampHelpers(n: number): number {
 export function sceneName(state: Partial<SceneState> & { level: Level }): string {
   const s = { ...DEFAULT_STATE, ...state }
   const { left, right } = clampFit(s.fit)
-  return `office-${s.level}-l${left}-r${right}-w${clampHelpers(s.helpers)}-${s.action}-p${s.pop ? 1 : 0}`
+  const dim = Math.max(0, DIMS.indexOf(s.dim))
+  return `office-${s.level}-l${left}-r${right}-w${clampHelpers(s.helpers)}-${s.action}-p${s.pop ? 1 : 0}-m${s.lite ? 1 : 0}-d${dim}`
 }
 
 /** Reads a scene name back; anything missing or unknown takes the default. */
 export function parseScene(scene: string): SceneState {
-  const m = /^office-(\d)(?:-l(\d+)-r(\d+))?(?:-w(\d+))?(?:-([a-z]+))?(?:-p([01]))?$/.exec(scene)
+  const m = /^office-(\d)(?:-l(\d+)-r(\d+))?(?:-w(\d+))?(?:-([a-z]+))?(?:-p([01]))?(?:-m([01]))?(?:-d([0-2]))?$/.exec(scene)
   const level = Number(m?.[1])
   const action = m?.[5] as Action | undefined
   return {
@@ -82,6 +102,8 @@ export function parseScene(scene: string): SceneState {
     helpers: clampHelpers(Number(m?.[4] ?? 0)),
     action: action !== undefined && ACTIONS.includes(action) ? action : 'file',
     pop: m?.[6] !== '0',
+    lite: m?.[7] === '1',
+    dim: DIMS[Number(m?.[8] ?? 1)] ?? 'medium',
   }
 }
 

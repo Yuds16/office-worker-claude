@@ -1,7 +1,22 @@
 {
   "name": "office-worker-claude",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A filing office backdrop where Claude panics as context fills, helpers join for subagents, and each tool call has its own pose",
   "license": "MIT",
-  "author": { "name": "Yuds16" }
+  "author": { "name": "Yuds16" },
+  "userConfig": {
+    "lite": {
+      "type": "boolean",
+      "title": "Lite mode",
+      "description": "Keep Claude moving but stop the background motion (rain, papers, lamps, clock, plants) and the glass blur, to use less of your computer.",
+      "default": false
+    },
+    "dim": {
+      "type": "string",
+      "title": "Dim behind the chat",
+      "description": "How much the scene darkens behind the conversation in the middle, so the text is easier to read.",
+      "options": ["light", "medium", "strong"],
+      "default": "medium"
+    }
+  }
 }

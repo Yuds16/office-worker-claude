@@ -1,7 +1,9 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import {
+  DIMS,
   FULL_WINDOW,
+  LITE_MAX_HELPERS,
   clampFit,
   clampHelpers,
   isLevel,
@@ -9,14 +11,24 @@ import {
   parseScene,
   sceneName,
   type Action,
+  type Dim,
   type Fit,
   type Level,
 } from './levels.js'
 import { scene } from './scene.js'
 
-// Light glass so the office shows beside the chat. Raise opacity if text
-// gets hard to read; raise blur to soften the scene behind the panels.
-const GLASS = { blur: 2, opacity: 0.3 }
+/**
+ * The frosted glass over the scene behind the app's panels: a dark tint that
+ * gets stronger with the `dim` option, so the chat reads easily. Lite mode
+ * drops the blur, the costliest part to draw.
+ */
+const GLASS_TINT = '#101216'
+const GLASS_OPACITY: Record<Dim, number> = { light: 0.35, medium: 0.48, strong: 0.6 }
+const GLASS_BLUR = 4
+
+function glass() {
+  return { blur: isLite() ? 0 : GLASS_BLUR, tint: GLASS_TINT, opacity: GLASS_OPACITY[dim] }
+}
 
 /**
  * Fewest milliseconds between two backdrop swaps. Each swap reloads the
@@ -52,6 +64,16 @@ let fit: Fit = FULL_WINDOW
 const helpers = new Set<string>()
 let action: Action = 'file'
 
+// The plugin's options (set in its settings), and `/office lite on|off`,
+// which overrides the lite option for this session.
+let liteOption = false
+let liteOverride: boolean | undefined
+let dim: Dim = 'medium'
+
+function isLite(): boolean {
+  return liteOverride ?? liteOption
+}
+
 // What was last drawn and when, a pending swap waiting out the gap, and
 // whether this copy of the module has drawn its first scene yet.
 let drawnName: string | undefined
@@ -67,7 +89,9 @@ function shownLevel(): Level {
 
 /** The scene name for the current state, before deciding on pop-in. */
 function wanted(pop: boolean): string {
-  return sceneName({ level: shownLevel(), fit, helpers: clampHelpers(helpers.size), action, pop })
+  const lite = isLite()
+  const shown = lite ? Math.min(helpers.size, LITE_MAX_HELPERS) : clampHelpers(helpers.size)
+  return sceneName({ level: shownLevel(), fit, helpers: shown, action, pop, lite, dim })
 }
 
 function isShown(): boolean {
@@ -103,7 +127,7 @@ async function refresh($: EngineInterface, force = false) {
   drawnName = name
   drawnLevel = level
   lastSwapAt = now
-  const set = await $.theme.set({ backdrop: { scene: name, glass: GLASS }, overrideColorScheme: 'dark' })
+  const set = await $.theme.set({ backdrop: { scene: name, glass: glass() }, overrideColorScheme: 'dark' })
   // Say why it is not drawn once per reason, not on every swap (a terminal
   // session or a closed window has no client that draws themes).
   const reason = set.isDrawn ? undefined : String(set.reason)
@@ -112,7 +136,7 @@ async function refresh($: EngineInterface, force = false) {
 }
 
 function withoutPop(name: string): string {
-  return name.replace(/-p[01]$/, '-p0')
+  return name.replace(/-p[01](?=-|$)/, '-p0')
 }
 
 /** Refreshes without holding up the caller; a failure only leaves the old scene up. */
@@ -130,14 +154,19 @@ function pose($: EngineInterface, tool: string, agentId: string | undefined) {
 
 const USAGE =
   'Usage: /office 1 to 6 previews a level; /office auto follows the real context; ' +
-  '/office fit <left%> <right%> fits the room beside open panels (/office fit 0 0 for the whole window).'
+  '/office fit <left%> <right%> fits the room beside open panels (/office fit 0 0 for the whole window); ' +
+  '/office lite on|off turns lite mode on or off for this session.'
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  // A change to these in the plugin's settings reloads the module with the new values.
+  liteOption = options.lite === true
+  dim = DIMS.find(d => d === options.dim) ?? 'medium'
+
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'office',
-      description: 'Preview an office level (1-6), follow the context (auto), or fit the room beside panels (fit)',
-      argumentHint: '[1-6|auto|fit <left%> <right%>]',
+      description: 'Preview an office level (1-6), follow the context (auto), fit the room beside panels (fit), or switch lite mode (lite)',
+      argumentHint: '[1-6|auto|fit <left%> <right%>|lite on|off]',
     })
     action = 'file'
     drawnName = undefined
@@ -201,6 +230,12 @@ export const register: Register = on => {
       contextLevel = levelFor(context.percent)
       await refresh($, true)
       text = `Following the real context again: ${context.percent ?? 0}% is level ${contextLevel}.`
+    } else if (word === 'lite' && (rest[0] === 'on' || rest[0] === 'off')) {
+      liteOverride = rest[0] === 'on'
+      await refresh($, true)
+      text = liteOverride
+        ? 'Lite mode is on for this session: Claude still moves, the background holds still.'
+        : 'Lite mode is off for this session.'
     } else if (word === 'fit') {
       const [left = '0', right = '0'] = rest
       fit = clampFit({ left: Number(left), right: Number(right) })
@@ -219,7 +254,9 @@ export const register: Register = on => {
         preview !== undefined
           ? `Previewing level ${preview} (context is at ${context.percent ?? 0}%).`
           : `Following the context: ${context.percent ?? 0}% is level ${levelFor(context.percent)}.`
-      text = `${state} Fit: ${fit.left}% left, ${fit.right}% right. Helpers working: ${helpers.size}.`
+      text =
+        `${state} Fit: ${fit.left}% left, ${fit.right}% right. Helpers working: ${helpers.size}. ` +
+        `Lite mode: ${isLite() ? 'on' : 'off'}. Dim: ${dim}.`
     } else {
       text = USAGE
     }

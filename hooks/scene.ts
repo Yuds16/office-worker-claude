@@ -1,5 +1,17 @@
 import { CLAUDE_HALF, PAPER_SHAPE, claude, type Mood, type Pose } from './claude.js'
-import { DEFAULT_STATE, FULL_WINDOW, clampFit, clampHelpers, type Action, type Fit, type Level, type SceneState } from './levels.js'
+import {
+  DEFAULT_STATE,
+  FULL_WINDOW,
+  LITE_MAX_HELPERS,
+  MAX_HELPERS,
+  clampFit,
+  clampHelpers,
+  type Action,
+  type Dim,
+  type Fit,
+  type Level,
+  type SceneState,
+} from './levels.js'
 
 // One camera looks into one room, so every wall, window, lamp and cabinet
 // lines up on the same vanishing point.
@@ -70,17 +82,50 @@ export const HELPER_SIZE = 0.7
 export const BOB_MIN_SECONDS = 0.34
 
 // --- Background desks along the far wall ---
-/** Each desk: x in room units from the middle (scaled with the room), and its depth. */
-export const BACK_DESKS = [
-  { x: -470, depth: 0.69 },
-  { x: -190, depth: 0.72 },
-  { x: 190, depth: 0.72 },
-  { x: 470, depth: 0.69 },
+export type DeskItem = 'papers' | 'lamp' | 'plant' | 'typewriter' | 'printer'
+
+/**
+ * Each desk: x in room units from the middle (scaled with the room), its
+ * depth, and what stands on it, from its outer end inward (up to three).
+ */
+export const BACK_DESKS: ReadonlyArray<{ x: number; depth: number; kit: readonly DeskItem[] }> = [
+  { x: -470, depth: 0.69, kit: ['papers', 'plant', 'lamp'] },
+  { x: -190, depth: 0.72, kit: ['typewriter', 'papers', 'plant'] },
+  { x: 190, depth: 0.72, kit: ['printer', 'papers', 'lamp'] },
+  { x: 470, depth: 0.69, kit: ['papers', 'typewriter', 'lamp'] },
 ]
+/** Where the three things on a desk stand, in room units from its outer end. */
+export const DESK_SLOTS = [45, 120, 188]
 /** Desk size in room units: width, depth front to back, and height. */
 export const DESK_WIDTH = 230
 export const DESK_DEPTH = 110
 export const DESK_HEIGHT = 150
+
+// --- Dimming behind the chat ---
+/** How dark the middle of the scene gets for each `dim` setting (0 to 1). */
+export const CENTER_DIM: Record<Dim, number> = { light: 0.18, medium: 0.32, strong: 0.46 }
+/** Where the dark band reaches full strength, as a share of the room's width from each side. */
+export const CENTER_DIM_EDGE = 0.3
+
+// --- Lite mode ---
+/**
+ * The animations lite mode leaves out: everything in the background. Their
+ * parts stay where they are drawn; flying papers and popping drawers are not
+ * drawn at all, and at most LITE_MAX_HELPERS helpers show.
+ */
+export const LITE_STILL = [
+  'twinkle',
+  'cloud',
+  'rain-',
+  'lightning',
+  'storm-glow',
+  '.hand',
+  'clock-turn',
+  'sway',
+  'swing',
+  'tw-feed',
+  'print-out',
+]
 
 // --- Papers, lamps, wall things ---
 /** Papers never fly higher than this (0 is the top of the room). */
@@ -201,6 +246,8 @@ function geometry(fit: Fit): Geometry {
 }
 
 let G = geometry(FULL_WINDOW)
+/** Whether the scene being drawn is in lite mode; set at the start of scene(). */
+let LITE = false
 let CX = G.viewW / 2
 
 function useGeometry(fit: Fit) {
@@ -416,9 +463,9 @@ function clock(level: Level): string {
 // ---------------------------------------------------------------- background desks
 
 /**
- * Desks along the far wall, each with a pile of papers, a desk lamp and a
- * potted plant. Drawn in the room, so they sit on the same vanishing point.
- * The paper piles grow with the level.
+ * Desks along the far wall, each with its own kit: paper piles that grow with
+ * the level, desk lamps, potted plants, typewriters and printers. Drawn in the
+ * room, so they sit on the same vanishing point.
  */
 function backDesks(level: Level, css: string[]): string {
   const k = G.viewW / VIEW_W
@@ -426,6 +473,10 @@ function backDesks(level: Level, css: string[]): string {
   css.push(
     `.sway{transform-box:fill-box;transform-origin:50% 100%;animation:plant-sway 5s ease-in-out infinite alternate}`,
     `@keyframes plant-sway{0%{transform:rotate(-3deg)}100%{transform:rotate(3deg)}}`,
+    `.tw-feed{animation:tw-feed 3s steps(5) infinite}`,
+    `@keyframes tw-feed{0%{transform:translateY(0px)}100%{transform:translateY(-8px)}}`,
+    `.print-out{animation:print-out 4s ease-in-out infinite}`,
+    `@keyframes print-out{0%{transform:translateY(-6px);opacity:0}20%{opacity:1}80%{transform:translateY(4px);opacity:1}100%{transform:translateY(6px);opacity:0}}`,
   )
   BACK_DESKS.forEach((d, i) => {
     const sf = d.depth
@@ -449,45 +500,84 @@ function backDesks(level: Level, css: string[]): string {
       `<polygon points="${pts([at(x0, top, sf), at(x1, top, sf), at(x1, top, sb), at(x0, top, sb)])}" fill="#7a5a3c"/>` +
       `<polygon points="${pts([at(x0, top, sf), at(x1, top, sf), at(x1, top + slab, sf), at(x0, top + slab, sf)])}" fill="#5e4430"/>`
 
-    // A pile of papers, a sheet more per level, each a little askew.
-    const px = d.x < 0 ? x0 + 30 : x1 - 100
-    for (let p = 0; p < 1 + level; p++) {
-      const y = top - 3 - p * 3
-      const skew = ((p * 7) % 5) - 2
-      out += `<polygon points="${pts([at(px + skew, y, sf * 1.005), at(px + 70 + skew, y, sf * 1.005), at(px + 66 - skew, y, sm), at(px - 4 - skew, y, sm)])}" fill="${p % 2 ? '#e8e2d4' : COLORS.paper}" stroke="#bdb5a5" stroke-width="0.6"/>`
-    }
-
-    // A desk lamp: base on the desk, an arm up and over, a shade with a warm pool below.
-    const lx = d.x < 0 ? x1 - 50 : x0 + 50
-    const [bx, by] = at(lx, top, sm)
-    const s = sm * 1.3
-    const reach = d.x < 0 ? -1 : 1
-    const hx = bx + reach * 34 * s
-    const hy = by - 78 * s
-    out +=
-      `<ellipse cx="${n(hx)}" cy="${n(by - 1)}" rx="${n(40 * s)}" ry="${n(8 * s)}" fill="${COLORS.lampLight}" opacity="0.16"/>` +
-      `<polygon points="${pts([[hx - 9 * s, hy + 8 * s], [hx + 9 * s, hy + 8 * s], [hx + 38 * s, by - 2], [hx - 38 * s, by - 2]])}" fill="${COLORS.lampLight}" opacity="0.1"/>` +
-      `<ellipse cx="${n(bx)}" cy="${n(by - 2)}" rx="${n(14 * s)}" ry="${n(4 * s)}" fill="#22252b"/>` +
-      `<path d="M${n(bx)} ${n(by - 3)}L${n(bx - reach * 8 * s)} ${n(by - 48 * s)}L${n(hx)} ${n(hy)}" stroke="#22252b" stroke-width="${n(4 * s)}" fill="none" stroke-linejoin="round"/>` +
-      `<circle cx="${n(bx - reach * 8 * s)}" cy="${n(by - 48 * s)}" r="${n(3.5 * s)}" fill="#3a3e46"/>` +
-      `<path d="M${n(hx - 12 * s)} ${n(hy + 9 * s)}L${n(hx - 6 * s)} ${n(hy - 6 * s)}H${n(hx + 6 * s)}L${n(hx + 12 * s)} ${n(hy + 9 * s)}Z" fill="#2f4a3c"/>` +
-      `<ellipse cx="${n(hx)}" cy="${n(hy + 9 * s)}" rx="${n(6 * s)}" ry="${n(2.5 * s)}" fill="#fff1d2"/>`
-
-    // A potted plant, swaying a little, each at its own moment.
-    const gx = d.x < 0 ? x0 + 120 : x1 - 140
-    const [qx, qy] = at(gx, top, sm)
-    const g = sm * 1.25
-    const leafSpots: Array<[number, number, number]> = [[-14, -34, -28], [12, -36, 24], [-4, -46, -6], [6, -28, 50], [-16, -22, -60]]
-    const leaves = leafSpots
-      .map(([dx, dy, r]) => `<ellipse cx="${n(dx * g)}" cy="${n(dy * g)}" rx="${n(6 * g)}" ry="${n(16 * g)}" fill="${r % 2 ? '#5f8f50' : '#4f7a45'}" transform="rotate(${r} ${n(dx * g)} ${n(dy * g)})"/>`)
-      .join('')
-    out +=
-      `<g transform="translate(${n(qx)} ${n(qy)})">` +
-      `<g class="sway" style="animation-delay:${n(-i * 1.3)}s">${leaves}</g>` +
-      `<path d="M${n(-12 * g)} ${n(-18 * g)}H${n(12 * g)}L${n(9 * g)} 0H${n(-9 * g)}Z" fill="#b5653f"/>` +
-      `<rect x="${n(-13 * g)}" y="${n(-20 * g)}" width="${n(26 * g)}" height="${n(4 * g)}" fill="#c97a52"/></g>`
+    // What stands on the desk, from its outer end inward.
+    const middle = (x0 + x1) / 2
+    d.kit.slice(0, DESK_SLOTS.length).forEach((item, slot) => {
+      const offset = DESK_SLOTS[slot] ?? 0
+      const x = d.x < 0 ? x0 + offset : x1 - offset
+      out += deskItem(item, x, middle, level, top, sf, sm, i)
+    })
   })
   return out
+}
+
+/** One thing on a desk, standing at room x on the desk top. */
+function deskItem(item: DeskItem, x: number, middle: number, level: number, top: number, sf: number, sm: number, i: number): string {
+  const [cx, cy] = at(x, top, sm)
+  const s = sm * 1.3
+  const p = (px: number, py: number) => `${n(cx + px * s)},${n(cy + py * s)}`
+  switch (item) {
+    case 'papers': {
+      // A pile of papers, a sheet more per level, each a little askew.
+      let out = ''
+      for (let sheet = 0; sheet < 1 + level; sheet++) {
+        const y = top - 3 - sheet * 3
+        const skew = ((sheet * 7) % 5) - 2
+        out += `<polygon points="${pts([at(x - 35 + skew, y, sf * 1.005), at(x + 35 + skew, y, sf * 1.005), at(x + 31 - skew, y, sm), at(x - 39 - skew, y, sm)])}" fill="${sheet % 2 ? '#e8e2d4' : COLORS.paper}" stroke="#bdb5a5" stroke-width="0.6"/>`
+      }
+      return out
+    }
+    case 'lamp': {
+      // Base on the desk, an arm up and over toward the desk's middle, a shade with a warm pool below.
+      const reach = x < middle ? 1 : -1
+      const hx = cx + reach * 34 * s
+      const hy = cy - 78 * s
+      return (
+        `<ellipse cx="${n(hx)}" cy="${n(cy - 1)}" rx="${n(40 * s)}" ry="${n(8 * s)}" fill="${COLORS.lampLight}" opacity="0.16"/>` +
+        `<polygon points="${pts([[hx - 9 * s, hy + 8 * s], [hx + 9 * s, hy + 8 * s], [hx + 38 * s, cy - 2], [hx - 38 * s, cy - 2]])}" fill="${COLORS.lampLight}" opacity="0.1"/>` +
+        `<ellipse cx="${n(cx)}" cy="${n(cy - 2)}" rx="${n(14 * s)}" ry="${n(4 * s)}" fill="#22252b"/>` +
+        `<path d="M${n(cx)} ${n(cy - 3)}L${n(cx - reach * 8 * s)} ${n(cy - 48 * s)}L${n(hx)} ${n(hy)}" stroke="#22252b" stroke-width="${n(4 * s)}" fill="none" stroke-linejoin="round"/>` +
+        `<circle cx="${n(cx - reach * 8 * s)}" cy="${n(cy - 48 * s)}" r="${n(3.5 * s)}" fill="#3a3e46"/>` +
+        `<path d="M${n(hx - 12 * s)} ${n(hy + 9 * s)}L${n(hx - 6 * s)} ${n(hy - 6 * s)}H${n(hx + 6 * s)}L${n(hx + 12 * s)} ${n(hy + 9 * s)}Z" fill="#2f4a3c"/>` +
+        `<ellipse cx="${n(hx)}" cy="${n(hy + 9 * s)}" rx="${n(6 * s)}" ry="${n(2.5 * s)}" fill="#fff1d2"/>`
+      )
+    }
+    case 'plant': {
+      // A potted plant, swaying a little, each at its own moment.
+      const g = sm * 1.25
+      const leafSpots: Array<[number, number, number]> = [[-14, -34, -28], [12, -36, 24], [-4, -46, -6], [6, -28, 50], [-16, -22, -60]]
+      const leaves = leafSpots
+        .map(([dx, dy, r]) => `<ellipse cx="${n(dx * g)}" cy="${n(dy * g)}" rx="${n(6 * g)}" ry="${n(16 * g)}" fill="${r % 2 ? '#5f8f50' : '#4f7a45'}" transform="rotate(${r} ${n(dx * g)} ${n(dy * g)})"/>`)
+        .join('')
+      return (
+        `<g transform="translate(${n(cx)} ${n(cy)})">` +
+        `<g class="sway" style="animation-delay:${n(-i * 1.3)}s">${leaves}</g>` +
+        `<path d="M${n(-12 * g)} ${n(-18 * g)}H${n(12 * g)}L${n(9 * g)} 0H${n(-9 * g)}Z" fill="#b5653f"/>` +
+        `<rect x="${n(-13 * g)}" y="${n(-20 * g)}" width="${n(26 * g)}" height="${n(4 * g)}" fill="#c97a52"/></g>`
+      )
+    }
+    case 'typewriter':
+      // A sheet in the roller feeding up a line at a time, then the body and keys.
+      return (
+        `<g class="tw-feed" style="animation-delay:${n(-i * 0.7)}s">` +
+        `<polygon points="${p(-13, -38)} ${p(13, -38)} ${p(13, -18)} ${p(-13, -18)}" fill="${COLORS.paper}"/>` +
+        `<path d="M${n(cx - 9 * s)} ${n(cy - 33 * s)}h${n(18 * s)}M${n(cx - 9 * s)} ${n(cy - 29 * s)}h${n(13 * s)}" stroke="#9a9284" stroke-width="${n(1.2 * s)}"/></g>` +
+        `<rect x="${n(cx - 22 * s)}" y="${n(cy - 21 * s)}" width="${n(44 * s)}" height="${n(6 * s)}" rx="${n(3 * s)}" fill="#1d1d21"/>` +
+        `<polygon points="${p(-26, 0)} ${p(26, 0)} ${p(22, -15)} ${p(-22, -15)}" fill="#2c2c30"/>` +
+        `<rect x="${n(cx - 18 * s)}" y="${n(cy - 10 * s)}" width="${n(36 * s)}" height="${n(4 * s)}" fill="#55555c"/>` +
+        `<rect x="${n(cx - 15 * s)}" y="${n(cy - 5 * s)}" width="${n(30 * s)}" height="${n(3 * s)}" fill="#46464d"/>`
+      )
+    case 'printer':
+      // Paper waiting at the back, the body, a sheet sliding out the front, a green light.
+      return (
+        `<polygon points="${p(-16, -28)} ${p(16, -28)} ${p(12, -46)} ${p(-12, -46)}" fill="${COLORS.paper}"/>` +
+        `<polygon points="${p(-30, -22)} ${p(30, -22)} ${p(26, -29)} ${p(-26, -29)}" fill="#4c515b"/>` +
+        `<rect x="${n(cx - 30 * s)}" y="${n(cy - 22 * s)}" width="${n(60 * s)}" height="${n(22 * s)}" rx="${n(2 * s)}" fill="#3a3e46"/>` +
+        `<rect x="${n(cx - 21 * s)}" y="${n(cy - 13 * s)}" width="${n(42 * s)}" height="${n(3 * s)}" fill="#1d1d21"/>` +
+        `<g class="print-out" style="animation-delay:${n(-i * 1.1)}s"><rect x="${n(cx - 16 * s)}" y="${n(cy - 11 * s)}" width="${n(32 * s)}" height="${n(9 * s)}" fill="${COLORS.paper}"/></g>` +
+        `<circle cx="${n(cx + 24 * s)}" cy="${n(cy - 17 * s)}" r="${n(1.6 * s)}" fill="#6fe08a"/>`
+      )
+  }
 }
 
 // ---------------------------------------------------------------- cabinets
@@ -593,7 +683,7 @@ function cabinets(level: Level, which: 'left' | 'right', css: string[], pop: boo
 
   // Drawers sliding out toward you and back, on cabinets that were already there.
   const slot = (G.cabH - 16) / 3
-  for (let d = 0; d < Math.min(look.drawers, old.length); d++) {
+  for (let d = 0; d < Math.min(LITE ? 0 : look.drawers, old.length); d++) {
     const cab = old[(d * 2 + 1) % old.length]
     if (cab === undefined) continue
     const x = cab[0] + 8
@@ -616,7 +706,7 @@ function cabinets(level: Level, which: 'left' | 'right', css: string[], pop: boo
   const zoneMax = sign < 0 ? outerScreen + PAPER_ZONE_WIDTH : outerScreen + 20
   const inward = -sign
   const speed = look.runSeconds / 8
-  for (let p = 0; p < look.papers; p++) {
+  for (let p = 0; p < (LITE ? 0 : look.papers); p++) {
     const c = cols.length === 0 ? 0 : p % cols.length
     const { outer, inner } = columnSpan(c, sign)
     const sx = at(outer + (inner - outer) * (0.3 + rnd() * 0.4), 0, f)[0]
@@ -837,6 +927,7 @@ export function scene(input: Level | SceneState, fit: Fit = FULL_WINDOW): string
   const look = LEVEL_LOOKS[level]
   const band = clampFit(state.fit)
   useGeometry(band)
+  LITE = state.lite
   const css: string[] = []
 
   // Claude's trip: file at the left stack, run, file at the right, run back.
@@ -849,7 +940,8 @@ export function scene(input: Level | SceneState, fit: Fit = FULL_WINDOW): string
   const flip = 0.6
   const step = look.stepSeconds
   const deskRight = state.action === 'write' ? deskSpan(startX)[1] : undefined
-  const [helpersBehind, helpersFront] = helpers(clampHelpers(state.helpers), look, css, deskRight)
+  const helperCount = Math.min(clampHelpers(state.helpers), LITE ? LITE_MAX_HELPERS : MAX_HELPERS)
+  const [helpersBehind, helpersFront] = helpers(helperCount, look, css, deskRight)
 
   const body =
     room(look) +
@@ -866,7 +958,9 @@ export function scene(input: Level | SceneState, fit: Fit = FULL_WINDOW): string
     helpersFront +
     mainClaude(state.action, look, startX, laneY, css, state.pop) +
     lamp('left', 'cone') +
-    lamp('right', 'cone')
+    lamp('right', 'cone') +
+    // A soft dark band down the middle, behind the chat, so its text reads easily.
+    `<rect x="-4000" y="-4000" width="${n(G.viewW + 8000)}" height="9000" fill="url(#center-dim)"/>`
 
   css.push(
     `.runner{animation:claude-run ${look.runSeconds}s ease-in-out infinite}`,
@@ -925,13 +1019,24 @@ export function scene(input: Level | SceneState, fit: Fit = FULL_WINDOW): string
     `@keyframes think-dot{0%,100%{opacity:0.25}40%{opacity:1}}`,
   )
 
+  // Lite mode: leave out the background's motion, so those parts stand still
+  // where they are drawn. Claude and the helpers keep moving.
+  const rules = LITE ? css.filter(rule => !LITE_STILL.some(part => rule.includes(part))) : css
+  const dim = CENTER_DIM[state.dim]
+
   // The room fills the band panels leave uncovered, anchored to its bottom.
   return (
     '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">' +
-    `<style>${css.join('')}</style>` +
+    `<style>${rules.join('')}</style>` +
     `<defs>${cabinetFrontDef()}` +
     `<linearGradient id="lamp-glow" x1="0" y1="0" x2="0" y2="1">` +
     `<stop offset="0" stop-color="${COLORS.lampLight}" stop-opacity="0.2"/><stop offset="1" stop-color="${COLORS.lampLight}" stop-opacity="0"/>` +
+    `</linearGradient>` +
+    `<linearGradient id="center-dim" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="${n(G.viewW)}" y2="0">` +
+    `<stop offset="0" stop-color="#000000" stop-opacity="0"/>` +
+    `<stop offset="${CENTER_DIM_EDGE}" stop-color="#000000" stop-opacity="${dim}"/>` +
+    `<stop offset="${1 - CENTER_DIM_EDGE}" stop-color="#000000" stop-opacity="${dim}"/>` +
+    `<stop offset="1" stop-color="#000000" stop-opacity="0"/>` +
     `</linearGradient></defs>` +
     `<rect width="100%" height="100%" fill="${COLORS.ceiling}"/>` +
     `<svg x="${band.left}%" width="${100 - band.left - band.right}%" height="100%" viewBox="0 0 ${n(G.viewW)} 1000" preserveAspectRatio="xMidYMax meet">` +
