@@ -4,7 +4,8 @@ A mod for the Claude Code desktop app that puts an animated filing office behind
 your conversation. A small, blocky orange Claude works there, and the office
 reacts to what your session is doing:
 
-- **As the context window fills,** filing cabinets pop in along the walls, the
+- **As the context window fills,** filing cabinets pop in, in stacks at the
+  front where Claude files and in rows lining the far wall behind the desks, the
   weather in the windows turns from a clear night to a storm, the pendant lamps
   swing harder, the clock spins faster, and Claude goes from calmly filing to
   sprinting with its arms in the air.
@@ -13,6 +14,7 @@ reacts to what your session is doing:
 - **When Claude calls a tool,** it does something different: rummages through a
   pulled-out drawer for reads and searches, types at a desk for edits, looks out
   through binoculars for web tools, and thinks with a bubble at the start of a turn.
+  For rummaging and looking out, Claude turns its back to you, so its face is out of sight.
 
 Everything is drawn in one-point perspective. Desks line the far wall, each with
 its own mix of paper piles, desk lamps, potted plants, typewriters and printers.
@@ -43,8 +45,8 @@ front of the stacks, others on the floor behind them:
 
 | | |
 |---|---|
-| **Read, Grep, Glob:** rummaging in a pulled-out drawer<br>![Rummaging](assets/08-pose-read.gif) | **Edit, Write:** typing at a desk<br>![Typing](assets/09-pose-write.gif) |
-| **WebFetch, WebSearch:** looking out through binoculars<br>![Binoculars](assets/10-pose-web.gif) | **Start of a turn:** thinking<br>![Thinking](assets/11-pose-think.gif) |
+| **Read, Grep, Glob:** back turned, rummaging in a pulled-out drawer<br>![Rummaging](assets/08-pose-read.gif) | **Edit, Write:** typing at a desk<br>![Typing](assets/09-pose-write.gif) |
+| **WebFetch, WebSearch:** back turned, looking out through binoculars<br>![Binoculars](assets/10-pose-web.gif) | **Start of a turn:** thinking<br>![Thinking](assets/11-pose-think.gif) |
 
 These are captured from the mod's own scene code in a browser, so they look the
 same as the backdrop in the app, apart from the glass the app lays over it.

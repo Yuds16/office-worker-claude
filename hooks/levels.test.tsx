@@ -1,8 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
 import { ACTIONS, DIMS, LEVELS, LITE_MAX_HELPERS, MAX_HELPERS, clampFit, levelFor, levelOfScene, parseScene, sceneName } from './levels.js'
-import { BACK_DESKS, LITE_STILL } from './scene.js'
-import { scene } from './scene.js'
+import { claude } from './claude.js'
+import { BACK_DESKS, BACK_STACKS, FACES_AWAY, LITE_STILL, scene } from './scene.js'
 
 test('percent maps to the six levels at the edges', async () => {
   expect(levelFor(undefined)).toBe(1)
@@ -75,9 +75,37 @@ test('each action draws its own pose', async () => {
   expect(draw('file').includes('class="runner"')).toBe(true)
   expect(draw('read').includes('class="dig')).toBe(true)
   expect(draw('write').includes('class="feed"')).toBe(true)
-  expect(draw('web').includes('#9fc4ff')).toBe(true)
   expect(draw('think').includes('dot-3')).toBe(true)
   for (const action of ['read', 'write', 'web', 'think'] as const) expect(draw(action).includes('class="runner"')).toBe(false)
+})
+
+test('Claude shows no face when turned away, and its face otherwise', async () => {
+  for (const mood of ['calm', 'stressed', 'chaos'] as const) {
+    const away = claude(mood, { pose: 'binoculars', back: true })
+    expect(away.includes('class="eyes"')).toBe(false)
+    expect(away.includes('rotate(14 -15 -50)')).toBe(false) // no brows
+    expect(away.includes('#9fc4ff')).toBe(false) // binoculars out of sight
+    expect(claude(mood, { pose: 'binoculars' }).includes('class="eyes"')).toBe(true)
+  }
+  // Rummaging and looking out face away; filing, typing and thinking face you.
+  expect([...FACES_AWAY].sort()).toEqual(['read', 'web'])
+  const eyesIn = (action: (typeof ACTIONS)[number]) =>
+    scene({ level: 2, fit: { left: 0, right: 0 }, helpers: 0, action, pop: false, lite: false, dim: 'medium' }).split('class="eyes"').length - 1
+  expect(eyesIn('read')).toBe(0)
+  expect(eyesIn('web')).toBe(0)
+  expect(eyesIn('think')).toBe(1)
+})
+
+test('cabinets pile up along the far wall as levels rise, with no papers or drawers', async () => {
+  let previous = -1
+  for (const level of LEVELS) {
+    const total = BACK_STACKS[level].left.concat(BACK_STACKS[level].right).reduce((a, b) => a + b, 0)
+    expect(total >= previous).toBe(true)
+    previous = total
+    const svg = scene({ level, fit: { left: 0, right: 0 }, helpers: 0, action: 'file', pop: false, lite: false, dim: 'medium' })
+    expect((svg.match(/<use href="#cab-front" transform=/g) ?? []).length).toBe(total)
+  }
+  expect(previous > 0).toBe(true)
 })
 
 for (const surface of ['desktop', 'mobile'] as const) {

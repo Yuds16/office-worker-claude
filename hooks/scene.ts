@@ -101,6 +101,28 @@ export const DESK_WIDTH = 230
 export const DESK_DEPTH = 110
 export const DESK_HEIGHT = 150
 
+// --- Cabinets along the far wall ---
+/**
+ * Cabinets that line up against the far wall as the context fills, from each
+ * corner inward, standing behind the desks and rising above them. Nobody
+ * files in them: they are just more of the office filling up. Cabinets per
+ * column, corner column first, for each level.
+ */
+export const BACK_STACKS: Record<Level, { left: number[]; right: number[] }> = {
+  1: { left: [], right: [] },
+  2: { left: [1], right: [] },
+  3: { left: [1, 1], right: [1] },
+  4: { left: [2, 1, 1], right: [1, 1, 1] },
+  5: { left: [2, 2, 1, 1], right: [2, 1, 2, 1] },
+  6: { left: [3, 2, 3, 2], right: [3, 3, 2, 2] },
+}
+/** Depth of the back cabinets' fronts: just in front of the far wall. */
+export const BACK_STACK_DEPTH = 0.665
+/** Gap between a back stack and the side wall, in room units. */
+export const BACK_STACK_INSET = 15
+/** Back cabinets stop this far (room units) from the middle, behind the chat. */
+export const BACK_STACK_MIN_X = 200
+
 // --- Dimming behind the chat ---
 /** How dark the middle of the scene gets for each `dim` setting (0 to 1). */
 export const CENTER_DIM: Record<Dim, number> = { light: 0.18, medium: 0.32, strong: 0.46 }
@@ -580,6 +602,56 @@ function deskItem(item: DeskItem, x: number, middle: number, level: number, top:
   }
 }
 
+// ---------------------------------------------------------------- back-wall cabinets
+
+/**
+ * Cabinets lining the far wall behind the desks. They pop in as the level
+ * rises, like the front stacks, but have no flying papers or popping drawers,
+ * and nobody runs to them. Drawn before the desks, which stand in front.
+ */
+function backStacks(level: Level, pop: boolean): string {
+  const k = G.viewW / VIEW_W
+  const f = BACK_STACK_DEPTH
+  const b = behind(f, CABINET_DEPTH)
+  const scale = f / STACK_DEPTH
+  let out = ''
+  let popIndex = 0
+  for (const which of ['left', 'right'] as const) {
+    const sign = which === 'left' ? -1 : 1
+    const cols = BACK_STACKS[level][which]
+    const before = level > 1 ? BACK_STACKS[(level - 1) as Level][which] : []
+    // From the corner inward, stopping short of the middle.
+    const outerX = G.roomW - BACK_STACK_INSET
+    const fits = cols.filter((_, c) => outerX - c * (CAB_W + CAB_GAP) - CAB_W >= BACK_STACK_MIN_X * k)
+    if (fits.length === 0) continue
+    const innerAll = outerX - (fits.length - 1) * (CAB_W + CAB_GAP) - CAB_W
+    out += `<polygon points="${pts([at(sign * (outerX + 10), FLOOR, f * 1.02), at(sign * (innerAll - 10), FLOOR, f * 1.02), at(sign * (innerAll - 10), FLOOR, b), at(sign * (outerX + 10), FLOOR, b)])}" fill="#000000" opacity="0.3"/>`
+    fits.forEach((height, c) => {
+      const outer = sign * (outerX - c * (CAB_W + CAB_GAP))
+      const inner = sign * (Math.abs(outer) - CAB_W)
+      const left = Math.min(outer, inner)
+      const right = Math.max(outer, inner)
+      for (let r = 0; r < height; r++) {
+        const bottom = FLOOR - r * CAB_H
+        const top = bottom - CAB_H
+        const [x, y] = at(left, top, f)
+        let box = `<polygon points="${pts([at(inner, top, f), at(inner, top, b), at(inner, bottom, b), at(inner, bottom, f)])}" fill="${COLORS.cabinetSide}"/>`
+        if (r === height - 1 && top > 0) {
+          box += `<polygon points="${pts([at(left, top, f), at(right, top, f), at(right, top, b), at(left, top, b)])}" fill="${COLORS.cabinetTop}"/>`
+        }
+        box += `<use href="#cab-front" transform="translate(${n(x)} ${n(y)}) scale(${n(scale)})"/>`
+        if (pop && r >= (before[c] ?? 0)) {
+          out += `<g class="cab-pop" style="animation-delay:${n(0.5 + popIndex * 0.2)}s">${box}</g>`
+          popIndex++
+        } else {
+          out += box
+        }
+      }
+    })
+  }
+  return out
+}
+
 // ---------------------------------------------------------------- cabinets
 
 // A cabinet's front, drawn once at its on-screen size and placed with <use>.
@@ -807,6 +879,9 @@ function helpers(count: number, look: LevelLook, css: string[], deskRight?: numb
 
 const POSES: Record<Action, Pose> = { file: 'carry', read: 'rummage', write: 'type', web: 'binoculars', think: 'think' }
 
+/** Actions Claude does with its back to you, facing into the room. */
+export const FACES_AWAY: readonly Action[] = ['read', 'web']
+
 /**
  * The main Claude. Filing runs between the stacks; every other action stays
  * by the left stack: rummaging in a pulled-out drawer, typing at a desk,
@@ -819,7 +894,8 @@ function mainClaude(action: Action, look: LevelLook, startX: number, laneY: numb
   const place = (inner: string) => `<g transform="translate(${n(x)} ${n(laneY)}) scale(${n(G.claudeScale)})">${inner}</g>`
   if (action === 'file') return `<g class="runner">${place(claude(look.mood))}</g>`
   const facing = action === 'read' || action === 'web' ? 'still-left' : 'still-right'
-  const me = place(claude(look.mood, { pose: POSES[action], facing }))
+  // Rummaging and looking out turn Claude away from you, into the scene: no face shows.
+  const me = place(claude(look.mood, { pose: POSES[action], facing, back: FACES_AWAY.includes(action) }))
   if (drawer !== undefined) return drawer.markup + me
   if (action === 'write') return me + desk(startX, css)
   return me
@@ -949,6 +1025,7 @@ export function scene(input: Level | SceneState, fit: Fit = FULL_WINDOW): string
     windowView(level, 'right', css) +
     corkBoard() +
     clock(level) +
+    backStacks(level, state.pop) +
     backDesks(level, css) +
     lamp('left', 'body') +
     lamp('right', 'body') +

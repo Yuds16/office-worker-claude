@@ -16,6 +16,8 @@ export const CLAUDE_COLORS = {
   body: '#d97757',
   top: '#ec9a7c',
   side: '#a9553b',
+  /** The back of the body, when Claude faces away. */
+  back: '#c4684b',
   eye: '#1f1512',
   sweat: '#8fd3ff',
   paper: '#f2ede2',
@@ -47,7 +49,7 @@ function nub(x: number, y: number, w: number, h: number, fill: string): string {
   return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"/><rect x="${x}" y="${y}" width="${w}" height="3" fill="${CLAUDE_COLORS.top}"/>`
 }
 
-function arms(mood: Mood, pose: Pose): string {
+function arms(mood: Mood, pose: Pose, back: boolean): string {
   const { body: O, side, eye: ink } = CLAUDE_COLORS
   switch (pose) {
     case 'rummage':
@@ -61,6 +63,10 @@ function arms(mood: Mood, pose: Pose): string {
       // Raised to the typewriter on the desk in front.
       return nub(-45, -30, 12, 10, side) + `<g class="tap">${nub(33, -62, 18, 9, O)}</g>`
     case 'binoculars':
+      if (back) {
+        // Seen from behind: arms raised to the face, the binoculars out of sight in front.
+        return nub(-43, -58, 10, 14, side) + nub(33, -58, 10, 14, O)
+      }
       // Arms up holding binoculars over the eyes.
       return (
         nub(-31, -46, 10, 14, O) +
@@ -100,47 +106,64 @@ function arms(mood: Mood, pose: Pose): string {
   }
 }
 
-export function claude(mood: Mood, options: { pose?: Pose; facing?: string; bob?: string } = {}): string {
-  const { pose = 'carry', facing = '', bob = 'bob' } = options
+/**
+ * Draws Claude. `back` turns Claude away from you, into the scene: the face
+ * (eyes, brows, mouth) is on the far side, so none of it shows, and the body
+ * reads as its back, a shade darker.
+ */
+export function claude(mood: Mood, options: { pose?: Pose; facing?: string; bob?: string; back?: boolean } = {}): string {
+  const { pose = 'carry', facing = '', bob = 'bob', back = false } = options
   const { body: O, top, side, eye: ink } = CLAUDE_COLORS
-  const brows =
-    mood === 'stressed' || mood === 'panic' || mood === 'chaos'
-      ? `<rect x="-21" y="-52" width="12" height="3" fill="${ink}" transform="rotate(14 -15 -50)"/>` +
-        `<rect x="8" y="-52" width="12" height="3" fill="${ink}" transform="rotate(-14 14 -50)"/>`
-      : ''
-  const mouth =
-    mood === 'chaos'
-      ? `<rect x="-6" y="-28" width="12" height="9" fill="${ink}"/>`
-      : mood === 'panic'
-        ? `<rect x="-4" y="-27" width="8" height="5" fill="${ink}"/>`
-        : ''
-  const sweat =
-    mood === 'panic' || mood === 'chaos'
-      ? `<path class="sweat" d="M-36 -64q-5 8 0 11q5 -3 0 -11z" fill="${CLAUDE_COLORS.sweat}"/>` +
-        (mood === 'chaos' ? `<path class="sweat sweat-late" d="M44 -60q-4 7 0 10q4 -3 0 -10z" fill="${CLAUDE_COLORS.sweat}"/>` : '')
-      : ''
-  const speedLines =
-    pose === 'carry' && (mood === 'panic' || mood === 'chaos')
-      ? `<path class="speed" d="M-52 -48H-70M-50 -36H-74M-52 -24H-68" stroke="#ffffff" stroke-width="3" stroke-linecap="round" opacity="0.35"/>`
-      : ''
+  const face = back
+    ? // The back of the body, with a faint seam where the head would turn.
+      `<rect x="-33" y="-54" width="66" height="42" fill="${CLAUDE_COLORS.back}"/>` +
+      `<rect x="-2" y="-52" width="4" height="36" fill="#000000" opacity="0.08"/>`
+    : eyes(mood) + browsFor(mood) + mouthFor(mood)
   return (
     `<g class="facing ${facing}">` +
     `<rect x="-80" y="-100" width="160" height="105" fill="none"/>` +
     `<ellipse cx="3" cy="1" rx="42" ry="6" fill="#000000" opacity="0.4"/>` +
-    speedLines +
+    speedLinesFor(mood, pose) +
     `<g class="leg leg-a"><rect x="-28" y="-12" width="7" height="12" fill="${side}"/><rect x="10" y="-12" width="7" height="12" fill="${side}"/></g>` +
     `<g class="leg leg-b"><rect x="-16" y="-12" width="7" height="12" fill="${side}"/><rect x="22" y="-12" width="7" height="12" fill="${side}"/></g>` +
     `<g class="${bob}">` +
-    // Body as a little box: top, side, then front.
+    // Body as a little box: top, side, then front (or back).
     `<polygon points="-33,-54 -27,-60 39,-60 33,-54" fill="${top}"/>` +
     `<polygon points="33,-54 39,-60 39,-18 33,-12" fill="${side}"/>` +
     `<rect x="-33" y="-54" width="66" height="42" fill="${O}"/>` +
     `<rect x="-33" y="-18" width="66" height="6" fill="#000000" opacity="0.14"/>` +
-    eyes(mood) +
-    brows +
-    mouth +
-    arms(mood, pose) +
-    sweat +
+    face +
+    arms(mood, pose, back) +
+    sweatFor(mood) +
     `</g></g>`
   )
+}
+
+function browsFor(mood: Mood): string {
+  const ink = CLAUDE_COLORS.eye
+  return mood === 'stressed' || mood === 'panic' || mood === 'chaos'
+      ? `<rect x="-21" y="-52" width="12" height="3" fill="${ink}" transform="rotate(14 -15 -50)"/>` +
+        `<rect x="8" y="-52" width="12" height="3" fill="${ink}" transform="rotate(-14 14 -50)"/>`
+    : ''
+}
+
+function mouthFor(mood: Mood): string {
+  const ink = CLAUDE_COLORS.eye
+  if (mood === 'chaos') return `<rect x="-6" y="-28" width="12" height="9" fill="${ink}"/>`
+  if (mood === 'panic') return `<rect x="-4" y="-27" width="8" height="5" fill="${ink}"/>`
+  return ''
+}
+
+function sweatFor(mood: Mood): string {
+  if (mood !== 'panic' && mood !== 'chaos') return ''
+  return (
+    `<path class="sweat" d="M-36 -64q-5 8 0 11q5 -3 0 -11z" fill="${CLAUDE_COLORS.sweat}"/>` +
+    (mood === 'chaos' ? `<path class="sweat sweat-late" d="M44 -60q-4 7 0 10q4 -3 0 -10z" fill="${CLAUDE_COLORS.sweat}"/>` : '')
+  )
+}
+
+function speedLinesFor(mood: Mood, pose: Pose): string {
+  return pose === 'carry' && (mood === 'panic' || mood === 'chaos')
+    ? `<path class="speed" d="M-52 -48H-70M-50 -36H-74M-52 -24H-68" stroke="#ffffff" stroke-width="3" stroke-linecap="round" opacity="0.35"/>`
+    : ''
 }
