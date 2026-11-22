@@ -1,0 +1,6 @@
+{
+  "name": "office-worker-claude",
+  "owner": { "name": "Yuds16" },
+  "description": "Marketplace for the office-worker-claude mod",
+  "plugins": [{ "name": "office-worker-claude", "source": "./" }]
+}

@@ -1,0 +1,7 @@
+{
+  "name": "office-worker-claude",
+  "version": "0.1.0",
+  "description": "A filing office backdrop where Claude panics as context fills, helpers join for subagents, and each tool call has its own pose",
+  "license": "MIT",
+  "author": { "name": "Yuds16" }
+}
