@@ -81,19 +81,23 @@ test('each action draws its own pose', async () => {
 
 test('Claude shows no face when turned away, and its face otherwise', async () => {
   for (const mood of ['calm', 'stressed', 'chaos'] as const) {
-    const away = claude(mood, { pose: 'binoculars', back: true })
+    const away = claude(mood, { pose: 'rummage', back: true })
     expect(away.includes('class="eyes"')).toBe(false)
     expect(away.includes('rotate(14 -15 -50)')).toBe(false) // no brows
-    expect(away.includes('#9fc4ff')).toBe(false) // binoculars out of sight
-    expect(claude(mood, { pose: 'binoculars' }).includes('class="eyes"')).toBe(true)
+    expect(claude(mood, { pose: 'rummage' }).includes('class="eyes"')).toBe(true)
   }
-  // Rummaging and looking out face away; filing, typing and thinking face you.
-  expect([...FACES_AWAY].sort()).toEqual(['read', 'web'])
-  const eyesIn = (action: (typeof ACTIONS)[number]) =>
-    scene({ level: 2, fit: { left: 0, right: 0 }, helpers: 0, action, pop: false, lite: false, dim: 'medium' }).split('class="eyes"').length - 1
+  // Only rummaging faces away; filing, typing, looking out and thinking face you.
+  expect([...FACES_AWAY]).toEqual(['read'])
+  const draw = (action: (typeof ACTIONS)[number]) =>
+    scene({ level: 4, fit: { left: 0, right: 0 }, helpers: 0, action, pop: false, lite: false, dim: 'medium' })
+  const eyesIn = (action: (typeof ACTIONS)[number]) => draw(action).split('class="eyes"').length - 1
   expect(eyesIn('read')).toBe(0)
-  expect(eyesIn('web')).toBe(0)
   expect(eyesIn('think')).toBe(1)
+  // Looking out: the same binoculars, facing you, panning left and right.
+  expect(draw('web').includes('#9fc4ff')).toBe(true)
+  expect(draw('web').includes('class="scan"')).toBe(true)
+  expect(draw('web').includes('@keyframes claude-scan')).toBe(true)
+  expect(draw('web').includes('rotate(14 -15 -50)')).toBe(true) // stressed brows show at level 4
 })
 
 test('cabinets pile up along the far wall as levels rise, with no papers or drawers', async () => {

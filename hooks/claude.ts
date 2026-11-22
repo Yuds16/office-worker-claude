@@ -49,7 +49,7 @@ function nub(x: number, y: number, w: number, h: number, fill: string): string {
   return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"/><rect x="${x}" y="${y}" width="${w}" height="3" fill="${CLAUDE_COLORS.top}"/>`
 }
 
-function arms(mood: Mood, pose: Pose, back: boolean): string {
+function arms(mood: Mood, pose: Pose): string {
   const { body: O, side, eye: ink } = CLAUDE_COLORS
   switch (pose) {
     case 'rummage':
@@ -63,19 +63,17 @@ function arms(mood: Mood, pose: Pose, back: boolean): string {
       // Raised to the typewriter on the desk in front.
       return nub(-45, -30, 12, 10, side) + `<g class="tap">${nub(33, -62, 18, 9, O)}</g>`
     case 'binoculars':
-      if (back) {
-        // Seen from behind: arms raised to the face, the binoculars out of sight in front.
-        return nub(-43, -58, 10, 14, side) + nub(33, -58, 10, 14, O)
-      }
-      // Arms up holding binoculars over the eyes.
+      // Arms up holding binoculars over the eyes, panning slowly left and right.
       return (
+        `<g class="scan">` +
         nub(-31, -46, 10, 14, O) +
         nub(21, -46, 10, 14, O) +
         `<rect x="-22" y="-50" width="15" height="16" rx="3" fill="#2a2a2e"/>` +
         `<rect x="5" y="-50" width="15" height="16" rx="3" fill="#2a2a2e"/>` +
         `<rect x="-7" y="-46" width="12" height="6" fill="#2a2a2e"/>` +
         `<rect x="-18" y="-46" width="5" height="4" fill="#9fc4ff" opacity="0.7"/>` +
-        `<rect x="9" y="-46" width="5" height="4" fill="#9fc4ff" opacity="0.7"/>`
+        `<rect x="9" y="-46" width="5" height="4" fill="#9fc4ff" opacity="0.7"/>` +
+        `</g>`
       )
     case 'think':
       return (
@@ -118,7 +116,8 @@ export function claude(mood: Mood, options: { pose?: Pose; facing?: string; bob?
     ? // The back of the body, with a faint seam where the head would turn.
       `<rect x="-33" y="-54" width="66" height="42" fill="${CLAUDE_COLORS.back}"/>` +
       `<rect x="-2" y="-52" width="4" height="36" fill="#000000" opacity="0.08"/>`
-    : eyes(mood) + browsFor(mood) + mouthFor(mood)
+    : // Behind binoculars the eyes are covered; leaving them out keeps them from peeking out as the binoculars pan.
+      (pose === 'binoculars' ? '' : eyes(mood)) + browsFor(mood) + mouthFor(mood)
   return (
     `<g class="facing ${facing}">` +
     `<rect x="-80" y="-100" width="160" height="105" fill="none"/>` +
@@ -133,7 +132,7 @@ export function claude(mood: Mood, options: { pose?: Pose; facing?: string; bob?
     `<rect x="-33" y="-54" width="66" height="42" fill="${O}"/>` +
     `<rect x="-33" y="-18" width="66" height="6" fill="#000000" opacity="0.14"/>` +
     face +
-    arms(mood, pose, back) +
+    arms(mood, pose) +
     sweatFor(mood) +
     `</g></g>`
   )

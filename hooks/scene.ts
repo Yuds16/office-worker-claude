@@ -880,7 +880,7 @@ function helpers(count: number, look: LevelLook, css: string[], deskRight?: numb
 const POSES: Record<Action, Pose> = { file: 'carry', read: 'rummage', write: 'type', web: 'binoculars', think: 'think' }
 
 /** Actions Claude does with its back to you, facing into the room. */
-export const FACES_AWAY: readonly Action[] = ['read', 'web']
+export const FACES_AWAY: readonly Action[] = ['read']
 
 /**
  * The main Claude. Filing runs between the stacks; every other action stays
@@ -893,8 +893,8 @@ function mainClaude(action: Action, look: LevelLook, startX: number, laneY: numb
   const x = drawer?.reach !== undefined ? drawer.reach + 40 * G.claudeScale : startX
   const place = (inner: string) => `<g transform="translate(${n(x)} ${n(laneY)}) scale(${n(G.claudeScale)})">${inner}</g>`
   if (action === 'file') return `<g class="runner">${place(claude(look.mood))}</g>`
-  const facing = action === 'read' || action === 'web' ? 'still-left' : 'still-right'
-  // Rummaging and looking out turn Claude away from you, into the scene: no face shows.
+  const facing = action === 'read' ? 'still-left' : 'still-right'
+  // Rummaging turns Claude away from you, into the drawer: no face shows.
   const me = place(claude(look.mood, { pose: POSES[action], facing, back: FACES_AWAY.includes(action) }))
   if (drawer !== undefined) return drawer.markup + me
   if (action === 'write') return me + desk(startX, css)
@@ -1088,6 +1088,9 @@ export function scene(input: Level | SceneState, fit: Fit = FULL_WINDOW): string
     `.dig{transform-box:fill-box;transform-origin:50% 0%;animation:claude-dig 0.36s ease-in-out infinite alternate}`,
     `.dig-late{animation-delay:-0.18s}`,
     `@keyframes claude-dig{0%{transform:rotate(-18deg) translateY(0px)}100%{transform:rotate(14deg) translateY(5px)}}`,
+    // Binoculars pan to one side, hold, pan across to the other, hold, and come back.
+    `.scan{transform-box:fill-box;transform-origin:50% 100%;animation:claude-scan 4s ease-in-out infinite}`,
+    `@keyframes claude-scan{0%,100%{transform:translateX(0px) rotate(0deg)}15%,35%{transform:translateX(-7px) rotate(-7deg)}55%,80%{transform:translateX(7px) rotate(7deg)}}`,
     `.tap{animation:claude-tap 0.22s ease-in-out infinite alternate}`,
     `@keyframes claude-tap{0%{transform:translateY(0px)}100%{transform:translateY(4px)}}`,
     `.dot{animation:think-dot 1.5s ease-in-out infinite}`,
