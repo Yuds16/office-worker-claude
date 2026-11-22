@@ -17,16 +17,36 @@ reacts to what your session is doing:
 Everything is drawn in one-point perspective, with desks, desk lamps and potted
 plants along the far wall, and the center of the window stays clear for the chat.
 
-## The six levels
+## Preview
 
-| Context | Level | What changes |
-|---|---|---|
-| 0-15% | Empty office | One cabinet per side, a clear night, Claude strolling |
-| 15-35% | Getting busy | Clouds, a second cabinet |
-| 35-55% | Busy | Drizzle, stacks on both sides, the first flying papers |
-| 55-75% | Stressed | Rain, drawers popping open, worried brows |
-| 75-90% | Panicking | A downpour, sweat, speed lines, crowded sides |
-| 90-100% | Chaos | A storm, the fullest stacks, arms up, lamps swinging wide |
+The whole climb, from an empty context window to a full one:
+
+![The office from level 1 to level 6](assets/00-climb.gif)
+
+### The six levels
+
+| | |
+|---|---|
+| **Empty office** (0-15%): one cabinet a side, a clear night, Claude strolling<br>![Level 1](assets/01-level-1.gif) | **Getting busy** (15-35%): clouds roll in, a second cabinet<br>![Level 2](assets/02-level-2.gif) |
+| **Busy** (35-55%): drizzle, stacks on both sides, the first flying papers<br>![Level 3](assets/03-level-3.gif) | **Stressed** (55-75%): rain, drawers popping open, worried brows<br>![Level 4](assets/04-level-4.gif) |
+| **Panicking** (75-90%): a downpour, sweat, speed lines, crowded sides<br>![Level 5](assets/05-level-5.gif) | **Chaos** (90-100%): a storm, the fullest stacks, arms up, lamps swinging wide<br>![Level 6](assets/06-level-6.gif) |
+
+### Helpers for subagents
+
+Each subagent at work gets a small helper of its own, up to six. Some run in
+front of the stacks, others on the floor behind them:
+
+![Six helpers at work](assets/07-helpers.gif)
+
+### A pose for each tool
+
+| | |
+|---|---|
+| **Read, Grep, Glob:** rummaging in a pulled-out drawer<br>![Rummaging](assets/08-pose-read.gif) | **Edit, Write:** typing at a desk<br>![Typing](assets/09-pose-write.gif) |
+| **WebFetch, WebSearch:** looking out through binoculars<br>![Binoculars](assets/10-pose-web.gif) | **Start of a turn:** thinking<br>![Thinking](assets/11-pose-think.gif) |
+
+These are captured from the mod's own scene code in a browser, so they look the
+same as the backdrop in the app, apart from the glass the app lays over it.
 
 ## Install
 
