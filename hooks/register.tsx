@@ -10,12 +10,14 @@ import {
   levelFor,
   parseScene,
   sceneName,
+  steadyName,
   type Action,
   type Dim,
   type Fit,
   type Level,
+  type SceneState,
 } from './levels.js'
-import { scene } from './scene.js'
+import { moveSeconds, runPosition, scene } from './scene.js'
 
 /**
  * The frosted glass over the scene behind the app's panels: a dark tint that
@@ -82,20 +84,34 @@ let lastSwapAt = Number.NEGATIVE_INFINITY
 let pending: { cancel: () => void } | undefined
 let ready = false
 let lastNotDrawn: string | undefined
+// The action last drawn, and when its filing run set off (after any opening
+// move), so the next scene can start Claude from where it is now.
+let drawnAction: Action | undefined
+let runStartedAt = 0
 
 function shownLevel(): Level {
   return preview ?? contextLevel
 }
 
-/** The scene name for the current state, before deciding on pop-in. */
-function wanted(pop: boolean): string {
+/** The state to draw now, before deciding on pop-in and the opening move. */
+function wantedState(pop: boolean): SceneState {
   const lite = isLite()
   const shown = lite ? Math.min(helpers.size, LITE_MAX_HELPERS) : clampHelpers(helpers.size)
-  return sceneName({ level: shownLevel(), fit, helpers: shown, action, pop, lite, dim })
+  return { level: shownLevel(), fit, helpers: shown, action, pop, lite, dim }
 }
 
 function isShown(): boolean {
-  return drawnName !== undefined && wanted(false) === withoutPop(drawnName)
+  return drawnName !== undefined && sceneName(wantedState(false)) === steadyName(drawnName)
+}
+
+/**
+ * The previous action, when Claude changes what it is doing, and where along
+ * its run it was if it was filing: the new scene opens by moving from there.
+ */
+function moveFrom(now: number): Pick<SceneState, 'from' | 'fromX'> {
+  if (drawnAction === undefined || drawnAction === action) return {}
+  if (drawnAction !== 'file') return { from: drawnAction }
+  return { from: 'file', fromX: runPosition(drawnLevel, (now - runStartedAt) / 1000) }
 }
 
 /**
@@ -123,9 +139,12 @@ async function refresh($: EngineInterface, force = false) {
   pending = undefined
   const level = shownLevel()
   // Cabinets pop in only when the level rose since the last drawing.
-  const name = wanted(drawnName === undefined || level > drawnLevel)
+  const state = { ...wantedState(drawnName === undefined || level > drawnLevel), ...moveFrom(now) }
+  const name = sceneName(state)
   drawnName = name
   drawnLevel = level
+  drawnAction = action
+  runStartedAt = now + moveSeconds(state) * 1000
   lastSwapAt = now
   const set = await $.theme.set({ backdrop: { scene: name, glass: glass() }, overrideColorScheme: 'dark' })
   // Say why it is not drawn once per reason, not on every swap (a terminal
@@ -133,10 +152,6 @@ async function refresh($: EngineInterface, force = false) {
   const reason = set.isDrawn ? undefined : String(set.reason)
   if (reason !== undefined && reason !== lastNotDrawn) $.ui.log('office-worker-claude: theme not drawn: ' + reason)
   lastNotDrawn = reason
-}
-
-function withoutPop(name: string): string {
-  return name.replace(/-p[01](?=-|$)/, '-p0')
 }
 
 /** Refreshes without holding up the caller; a failure only leaves the old scene up. */
@@ -170,6 +185,7 @@ export const register: Register = (on, options) => {
     })
     action = 'file'
     drawnName = undefined
+    drawnAction = undefined
     const { context } = await $.session.usage()
     contextLevel = levelFor(context.percent)
     // After a reload, pick up subagents already at work. Workflow agents are

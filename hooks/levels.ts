@@ -45,6 +45,13 @@ export type SceneState = {
   /** Lite mode: Claude still moves, the background holds still. */
   lite: boolean
   dim: Dim
+  /**
+   * The action drawn just before, when it differs: the scene opens with a
+   * short move from that pose into this one instead of cutting straight to it.
+   */
+  from?: Action
+  /** When coming from filing: how far along the run Claude was, 0 (left stack) to 100 (right stack). */
+  fromX?: number
 }
 
 export const DEFAULT_STATE: SceneState = {
@@ -88,15 +95,28 @@ export function sceneName(state: Partial<SceneState> & { level: Level }): string
   const s = { ...DEFAULT_STATE, ...state }
   const { left, right } = clampFit(s.fit)
   const dim = Math.max(0, DIMS.indexOf(s.dim))
-  return `office-${s.level}-l${left}-r${right}-w${clampHelpers(s.helpers)}-${s.action}-p${s.pop ? 1 : 0}-m${s.lite ? 1 : 0}-d${dim}`
+  const base = `office-${s.level}-l${left}-r${right}-w${clampHelpers(s.helpers)}-${s.action}-p${s.pop ? 1 : 0}-m${s.lite ? 1 : 0}-d${dim}`
+  if (s.from === undefined || s.from === s.action) return base
+  return base + `-f${s.from}` + (s.from === 'file' ? `-x${clampRun(s.fromX)}` : '')
+}
+
+/** A run position as a whole percent, 0 to 100. */
+export function clampRun(x: number | undefined): number {
+  return Math.max(0, Math.min(100, Math.round(Number.isFinite(x) ? Number(x) : 0)))
+}
+
+/** The scene name without its opening move or pop-in: what stays on screen once both are over. */
+export function steadyName(name: string): string {
+  return name.replace(/-p[01](?=-|$)/, '-p0').replace(/-f[a-z]+(-x\d+)?$/, '')
 }
 
 /** Reads a scene name back; anything missing or unknown takes the default. */
 export function parseScene(scene: string): SceneState {
-  const m = /^office-(\d)(?:-l(\d+)-r(\d+))?(?:-w(\d+))?(?:-([a-z]+))?(?:-p([01]))?(?:-m([01]))?(?:-d([0-2]))?$/.exec(scene)
+  const m = /^office-(\d)(?:-l(\d+)-r(\d+))?(?:-w(\d+))?(?:-([a-z]+))?(?:-p([01]))?(?:-m([01]))?(?:-d([0-2]))?(?:-f([a-z]+))?(?:-x(\d+))?$/.exec(scene)
   const level = Number(m?.[1])
   const action = m?.[5] as Action | undefined
-  return {
+  const from = m?.[9] as Action | undefined
+  const state: SceneState = {
     level: isLevel(level) ? level : 1,
     fit: clampFit({ left: Number(m?.[2] ?? 0), right: Number(m?.[3] ?? 0) }),
     helpers: clampHelpers(Number(m?.[4] ?? 0)),
@@ -105,6 +125,11 @@ export function parseScene(scene: string): SceneState {
     lite: m?.[7] === '1',
     dim: DIMS[Number(m?.[8] ?? 1)] ?? 'medium',
   }
+  if (from !== undefined && ACTIONS.includes(from) && from !== state.action) {
+    state.from = from
+    if (from === 'file') state.fromX = clampRun(Number(m?.[10] ?? 0))
+  }
+  return state
 }
 
 export function levelOfScene(scene: string): Level {

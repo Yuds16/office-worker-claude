@@ -1,8 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
-import { ACTIONS, DIMS, LEVELS, LITE_MAX_HELPERS, MAX_HELPERS, clampFit, levelFor, levelOfScene, parseScene, sceneName } from './levels.js'
+import { ACTIONS, DIMS, LEVELS, LITE_MAX_HELPERS, MAX_HELPERS, clampFit, levelFor, levelOfScene, parseScene, sceneName, steadyName } from './levels.js'
 import { claude } from './claude.js'
-import { BACK_DESKS, BACK_STACKS, FACES_AWAY, LITE_STILL, scene } from './scene.js'
+import { BACK_DESKS, BACK_STACKS, FACES_AWAY, LEVEL_LOOKS, LITE_STILL, MOVE_HOLD, MOVE_MAX_WALK, moveSeconds, runPosition, scene } from './scene.js'
 
 test('percent maps to the six levels at the edges', async () => {
   expect(levelFor(undefined)).toBe(1)
@@ -218,3 +218,71 @@ test('/office lite on and off switch the scene and the glass', async ($, on) => 
   expect(sets.map(s => s.scene.endsWith('-m1-d1'))).toEqual([true, false])
   expect(sets.map(s => s.blur)).toEqual([0, 4])
 })
+
+const moving = (action: (typeof ACTIONS)[number], from: (typeof ACTIONS)[number], fromX?: number) => ({
+  level: 3 as const,
+  fit: { left: 0, right: 0 },
+  helpers: 0,
+  action,
+  pop: false,
+  lite: false,
+  dim: 'medium' as const,
+  from,
+  ...(fromX === undefined ? {} : { fromX }),
+})
+
+test('scene names carry the move from the previous action, and drop it once steady', async () => {
+  for (const action of ACTIONS) {
+    for (const from of ACTIONS) {
+      if (from === action) continue
+      const state = moving(action, from, from === 'file' ? 63 : undefined)
+      const name = sceneName(state)
+      expect(/^[A-Za-z0-9_-]{1,64}$/.test(name)).toBe(true)
+      expect(parseScene(name)).toEqual(state)
+      expect(steadyName(name)).toBe(sceneName({ ...state, from: undefined, fromX: undefined }))
+    }
+  }
+  // The longest name still fits.
+  expect(sceneName({ level: 6, fit: { left: 70, right: 0 }, helpers: 6, action: 'think', pop: true, lite: true, dim: 'strong', from: 'file', fromX: 100 }).length <= 64).toBe(true)
+  // No move to the same action.
+  expect(sceneName(moving('read', 'read')).includes('-f')).toBe(false)
+})
+
+test('a change of action opens with a move that ends on the new pose', async () => {
+  // From mid-run to the drawer: Claude walks over, then settles in; nothing lingers.
+  const toRead = scene(moving('read', 'file', 80))
+  expect(toRead.includes('class="mv-walker" opacity="0"')).toBe(true)
+  expect(toRead.includes('class="mv-ghost"')).toBe(false)
+  expect(toRead.includes('class="mv-in"')).toBe(true)
+  expect(toRead.includes('class="mv-prop"')).toBe(true)
+  // From typing back to filing: the desk fades, the old pose lingers, and the run waits.
+  const toFile = scene(moving('file', 'write'))
+  expect(toFile.includes('class="mv-out" opacity="0"')).toBe(true)
+  expect(toFile.includes('class="mv-ghost" opacity="0"')).toBe(true)
+  expect(toFile.includes('.mv-in .runner')).toBe(true)
+  // Everything that leaves rests hidden, so a still drawing shows only the new pose.
+  for (const svg of [toRead, toFile]) {
+    for (const cls of ['mv-out', 'mv-ghost', 'mv-walker']) {
+      for (const [, attrs] of svg.matchAll(new RegExp(`class="${cls}"([^>]*)>`, 'g'))) expect(String(attrs).includes('opacity="0"')).toBe(true)
+    }
+  }
+  // A steady scene has no move at all.
+  expect(scene({ ...moving('read', 'file'), from: undefined }).includes('mv-')).toBe(false)
+})
+
+test('the move stays short, and the run is followed from where it was', async () => {
+  for (const action of ACTIONS) {
+    for (const from of ACTIONS) {
+      if (from === action) continue
+      const t = moveSeconds(moving(action, from, 100))
+      expect(t >= 0 && t <= MOVE_HOLD + MOVE_MAX_WALK + 1e-9).toBe(true)
+    }
+  }
+  const { runSeconds, pause } = LEVEL_LOOKS[3]
+  expect(runPosition(3, 0)).toBe(0)
+  expect(runPosition(3, runSeconds * (pause / 2))).toBe(0)
+  expect(runPosition(3, runSeconds * 0.5)).toBe(100)
+  expect(runPosition(3, runSeconds * 0.25 + runSeconds * (pause / 2))).toBe(50)
+  expect(runPosition(3, runSeconds * 3)).toBe(0)
+})
+

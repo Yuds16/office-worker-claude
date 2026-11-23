@@ -103,6 +103,9 @@ takes effect right away.
 - To keep motion gentle, the backdrop changes at most once every five seconds,
   always showing the latest state. With reduced motion turned on, the app shows
   the scene still.
+- Switching poses doesn't cut straight to the new scene. Claude hurries over
+  from where it was, the old props fade out, and the new pose settles in. This
+  takes about a second.
 - If the scene is hidden behind the glass, check that Transparency effects is on
   (Windows) or Reduce transparency is off (macOS).
 

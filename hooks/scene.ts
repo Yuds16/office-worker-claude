@@ -882,29 +882,168 @@ const POSES: Record<Action, Pose> = { file: 'carry', read: 'rummage', write: 'ty
 /** Actions Claude does with its back to you, facing into the room. */
 export const FACES_AWAY: readonly Action[] = ['read']
 
+/** Seconds the old pose lingers while its props fade, before Claude sets off. */
+export const MOVE_HOLD = 0.3
+/** Longest walk from the old spot to the new one, in seconds. */
+export const MOVE_MAX_WALK = 1.1
+/** How much faster than its usual run Claude hurries to a new pose. */
+export const MOVE_HURRY = 1.6
+/** Walks shorter than this many units are skipped: Claude just turns into the new pose. */
+const MOVE_MIN_DISTANCE = 6
+
 /**
- * The main Claude. Filing runs between the stacks; every other action stays
- * by the left stack: rummaging in a pulled-out drawer, typing at a desk,
- * looking out through binoculars, or thinking.
+ * Where Claude stands for an action, before any run: by the left stack, or
+ * stepped up to the pulled-out drawer when rummaging.
  */
-function mainClaude(action: Action, look: LevelLook, startX: number, laneY: number, css: string[], pop: boolean): string {
-  // Rummaging steps up so its arms reach into the pulled-out drawer.
-  const drawer = action === 'read' ? openDrawer(look, css, pop) : undefined
-  const x = drawer?.reach !== undefined ? drawer.reach + 40 * G.claudeScale : startX
+function poseX(action: Action, look: LevelLook, startX: number): number {
+  const reach = action === 'read' ? drawerBox(look)?.tr[0] : undefined
+  return reach !== undefined ? reach + 40 * G.claudeScale : startX
+}
+
+type Move = { from: Action; fromX: number; toX: number; hold: number; walk: number; arrive: number }
+
+/** The opening move from the previous action, or none when the scene opens as it stays. */
+function movePlan(state: SceneState, look: LevelLook, startX: number, endX: number): Move | undefined {
+  const from = state.from
+  if (from === undefined || from === state.action) return undefined
+  const fromX = from === 'file' ? startX + ((state.fromX ?? 0) / 100) * (endX - startX) : poseX(from, look, startX)
+  const toX = poseX(state.action, look, startX)
+  const hold = from === 'file' ? 0 : MOVE_HOLD
+  const distance = Math.abs(toX - fromX)
+  // The usual run covers the room in the half trip less its pause.
+  const speed = (MOVE_HURRY * Math.max(1, endX - startX)) / (look.runSeconds * (0.5 - look.pause))
+  const walk = distance < MOVE_MIN_DISTANCE ? 0 : Math.min(MOVE_MAX_WALK, Math.max(0.3, distance / speed))
+  return { from, fromX, toX, hold, walk, arrive: hold + walk }
+}
+
+/** Claude for an action, placed at x; filing runs, every other action holds its pose. */
+function posed(action: Action, look: LevelLook, x: number, laneY: number): string {
   const place = (inner: string) => `<g transform="translate(${n(x)} ${n(laneY)}) scale(${n(G.claudeScale)})">${inner}</g>`
   if (action === 'file') return `<g class="runner">${place(claude(look.mood))}</g>`
   const facing = action === 'read' ? 'still-left' : 'still-right'
   // Rummaging turns Claude away from you, into the drawer: no face shows.
-  const me = place(claude(look.mood, { pose: POSES[action], facing, back: FACES_AWAY.includes(action) }))
-  if (drawer !== undefined) return drawer.markup + me
-  if (action === 'write') return me + desk(startX, css)
-  return me
+  return place(claude(look.mood, { pose: POSES[action], facing, back: FACES_AWAY.includes(action) }))
 }
 
-/** The innermost left cabinet's middle drawer, pulled out toward you, papers flying out. */
-function openDrawer(look: LevelLook, css: string[], pop: boolean): { markup: string; reach?: number } {
+/** What an action sets out around Claude: the drawer behind it, the desk in front. */
+function propsFor(action: Action, look: LevelLook, startX: number, css: string[], pop: boolean): { behind: string; front: string } {
+  if (action === 'read') return { behind: openDrawer(look, css, pop), front: '' }
+  if (action === 'write') return { behind: '', front: desk(startX, css) }
+  return { behind: '', front: '' }
+}
+
+/**
+ * The main Claude. Filing runs between the stacks; every other action stays
+ * by the left stack: rummaging in a pulled-out drawer, typing at a desk,
+ * looking out through binoculars, or thinking.
+ *
+ * A scene that follows another action opens with a short move: the old pose
+ * lingers while its props fade, Claude hurries over from where it was, and
+ * settles into the new pose as its props fade in. Each part rests in its
+ * finished place in the plain markup (the old ones hidden), so with motion
+ * turned off the scene shows the new pose straight away.
+ */
+function mainClaude(state: SceneState, look: LevelLook, startX: number, endX: number, laneY: number, css: string[]): string {
+  const { action, pop } = state
+  const x = poseX(action, look, startX)
+  const props = propsFor(action, look, startX, css, pop)
+  const move = movePlan(state, look, startX, endX)
+  if (move === undefined) return props.behind + posed(action, look, x, laneY) + props.front
+
+  const { from, fromX, toX, hold, walk, arrive } = move
+  const pct = (t: number) => n((t / arrive) * 100)
+  let out = ''
+  // The old props fade as Claude leaves them.
+  const old = propsFor(from, look, startX, css, false)
+  if (old.behind + old.front !== '') {
+    css.push(`.mv-out{animation:mv-out 0.35s ease-in both}`, `@keyframes mv-out{0%{opacity:1}100%{opacity:0}}`)
+    out += `<g class="mv-out" opacity="0">${old.behind}${old.front}</g>`
+  }
+  // The old pose holds a moment, unless Claude was mid-run.
+  if (from !== 'file') {
+    css.push(
+      `.mv-ghost{animation:mv-ghost ${n(arrive)}s linear both}`,
+      `@keyframes mv-ghost{0%,${pct(hold - 0.01)}%{opacity:1}${pct(hold)}%,100%{opacity:0}}`,
+    )
+    out += `<g class="mv-ghost" opacity="0">${posed(from, look, fromX, laneY)}</g>`
+  }
+  // Then it walks, facing the way it goes, from the old spot to the new one.
+  if (walk > 0) {
+    const facing = toX < fromX ? 'still-left' : 'still-right'
+    css.push(
+      `.mv-walker{animation:mv-walker ${n(arrive)}s linear both}`,
+      `@keyframes mv-walker{0%{opacity:${hold > 0 ? 0 : 1}}${hold > 0 ? `${pct(hold - 0.01)}%{opacity:0}${pct(hold)}%{opacity:1}` : ''}${pct(arrive - 0.01)}%{opacity:1}100%{opacity:0}}`,
+      `.mv-walk{animation:mv-walk ${n(walk)}s ease-in-out ${n(hold)}s both}`,
+      `@keyframes mv-walk{0%{transform:translateX(0px)}100%{transform:translateX(${n(toX - fromX)}px)}}`,
+    )
+    out +=
+      `<g class="mv-walker" opacity="0"><g class="mv-walk">` +
+      `<g transform="translate(${n(fromX)} ${n(laneY)}) scale(${n(G.claudeScale)})">${claude(look.mood, { facing })}</g>` +
+      `</g></g>`
+  }
+  // On arrival the new pose appears with a little squash and settle, and a
+  // new run waits until then to set off.
+  css.push(
+    `.mv-in{animation:mv-in ${n(arrive)}s linear both}`,
+    `@keyframes mv-in{0%,${pct(arrive - 0.01)}%{opacity:0}100%{opacity:1}}`,
+    `.mv-settle{transform-box:fill-box;transform-origin:50% 100%;animation:mv-settle 0.4s ease-out ${n(arrive)}s both}`,
+    `@keyframes mv-settle{0%{transform:scale(1.08,0.9)}45%{transform:scale(0.96,1.05)}100%{transform:scale(1,1)}}`,
+    `.mv-in .runner,.mv-in .runner .facing{animation-delay:${n(arrive)}s}`,
+    `.mv-prop{animation:mv-prop 0.4s ease-out ${n(Math.max(0, arrive - 0.1))}s both}`,
+    `@keyframes mv-prop{0%{opacity:0;transform:translateY(10px)}100%{opacity:1;transform:translateY(0px)}}`,
+  )
+  const wrapProp = (markup: string) => (markup === '' ? '' : `<g class="mv-prop">${markup}</g>`)
+  return (
+    wrapProp(props.behind) +
+    out +
+    `<g class="mv-in"><g class="mv-settle">${posed(action, look, x, laneY)}</g></g>` +
+    wrapProp(props.front)
+  )
+}
+
+/**
+ * Seconds the opening move takes before the new pose is in place: a filing
+ * run starts this late, which register.tsx needs to tell where Claude is later.
+ */
+export function moveSeconds(state: SceneState): number {
+  useGeometry(clampFit(state.fit))
+  const look = LEVEL_LOOKS[state.level]
+  const { startX, endX } = runSpan(look)
+  return movePlan(state, look, startX, endX)?.arrive ?? 0
+}
+
+/**
+ * How far along its run (0 at the left stack, 100 at the right) a filing
+ * Claude is, `seconds` after its run started. Follows the run's keyframes,
+ * with smoothstep standing in for ease-in-out.
+ */
+export function runPosition(level: Level, seconds: number): number {
+  const { runSeconds, pause } = LEVEL_LOOKS[level]
+  if (!(seconds > 0)) return 0
+  const u = (seconds % runSeconds) / runSeconds
+  const ease = (t: number) => t * t * (3 - 2 * t)
+  const leg = 0.5 - pause
+  let f: number
+  if (u < pause) f = 0
+  else if (u < 0.5) f = ease((u - pause) / leg)
+  else if (u < 0.5 + pause) f = 1
+  else f = 1 - ease((u - 0.5 - pause) / leg)
+  return Math.round(f * 100)
+}
+
+/** The run's two ends: where Claude files at the left stack and at the right. */
+function runSpan(look: LevelLook): { startX: number; endX: number } {
+  const half = CLAUDE_HALF * G.claudeScale
+  return {
+    startX: stackReach(look.left, -1) + CLAUDE_PATH_START + half,
+    endX: stackReach(look.right, 1) - CLAUDE_PATH_END - half,
+  }
+}
+
+/** The innermost left cabinet's middle drawer, pulled out toward you: where it is drawn. */
+function drawerBox(look: LevelLook) {
   const cols = columns(look.left)
-  if (cols.length === 0) return { markup: '' }
+  if (cols.length === 0) return undefined
   const { outer, inner } = columnSpan(cols.length - 1, -1)
   const [cx, cy] = at(Math.min(outer, inner), FLOOR - CAB_H, STACK_DEPTH)
   const slot = (G.cabH - 16) / 3
@@ -915,9 +1054,14 @@ function openDrawer(look: LevelLook, css: string[], pop: boolean): { markup: str
   // Pulling a drawer toward you grows it away from the vanishing point.
   const k = 1.09
   const out = (px: number, py: number): Point => [CX + (px - CX) * k, EYE_Y + (py - EYE_Y) * k]
-  const tl = out(x, y)
-  const tr = out(x + w, y)
-  const br = out(x + w, y + h)
+  return { x, y, w, h, k, tl: out(x, y), tr: out(x + w, y), br: out(x + w, y + h) }
+}
+
+/** The open drawer, papers flying out. */
+function openDrawer(look: LevelLook, css: string[], pop: boolean): string {
+  const box = drawerBox(look)
+  if (box === undefined) return ''
+  const { x, y, w, h, k, tl, tr, br } = box
   let papers = ''
   for (let i = 0; i < 3; i++) {
     const dx = (i - 1) * 22
@@ -938,10 +1082,7 @@ function openDrawer(look: LevelLook, css: string[], pop: boolean): { markup: str
     `<rect x="${n(tl[0] + (w * k) / 2 - 11)}" y="${n(tl[1] + (h * k) / 2 - 3)}" width="22" height="6" rx="2" fill="${COLORS.handle}"/>` +
     papers
   // While cabinets pop in, the drawer waits until its cabinet is there.
-  return {
-    markup: pop ? `<g class="cab-pop" style="animation-delay:1.4s">${markup}</g>` : markup,
-    reach: tr[0],
-  }
+  return pop ? `<g class="cab-pop" style="animation-delay:1.4s">${markup}</g>` : markup
 }
 
 /** A small desk with a typewriter, just right of Claude and a little in front. */
@@ -1007,9 +1148,7 @@ export function scene(input: Level | SceneState, fit: Fit = FULL_WINDOW): string
   const css: string[] = []
 
   // Claude's trip: file at the left stack, run, file at the right, run back.
-  const half = CLAUDE_HALF * G.claudeScale
-  const startX = stackReach(look.left, -1) + CLAUDE_PATH_START + half
-  const endX = stackReach(look.right, 1) - CLAUDE_PATH_END - half
+  const { startX, endX } = runSpan(look)
   const laneY = at(0, FLOOR, CLAUDE_DEPTH)[1]
   const p = n(look.pause * 100)
   const back = n(50 + look.pause * 100)
@@ -1033,7 +1172,7 @@ export function scene(input: Level | SceneState, fit: Fit = FULL_WINDOW): string
     cabinets(level, 'left', css, state.pop) +
     cabinets(level, 'right', css, state.pop) +
     helpersFront +
-    mainClaude(state.action, look, startX, laneY, css, state.pop) +
+    mainClaude(state, look, startX, endX, laneY, css) +
     lamp('left', 'cone') +
     lamp('right', 'cone') +
     // A soft dark band down the middle, behind the chat, so its text reads easily.
